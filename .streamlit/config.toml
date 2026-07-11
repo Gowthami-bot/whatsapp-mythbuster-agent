@@ -1,0 +1,5 @@
+[server]
+# Disable Streamlit's file watcher to prevent crashes and tracebacks
+# caused by dynamic attribute checks (__path__) on heavy ML modules
+# (e.g. PyTorch/Transformers imported via sentence-transformers).
+fileWatcherType = "none"
