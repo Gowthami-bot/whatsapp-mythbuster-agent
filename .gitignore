@@ -1,0 +1,27 @@
+# Environment variables (contains API keys - never commit)
+.env
+
+# Virtual environment
+.venv/
+
+# Local vector storage
+qdrant_storage/
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Pytest cache
+.pytest_cache/
+
+# IDE
+.vscode/
+.idea/
+
+# Streamlit
+.streamlit/secrets.toml
+
+# OS files
+.DS_Store
+Thumbs.db
