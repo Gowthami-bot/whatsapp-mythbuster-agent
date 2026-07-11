@@ -10,6 +10,7 @@ import os
 # Bridge Streamlit secrets into environment variables so os.getenv() picks them up
 for key, value in st.secrets.items():
     os.environ[key] = str(value)
+st.write("DEBUG - secret keys found:", list(st.secrets.keys()))
 import logging
 import sys
 
