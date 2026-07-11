@@ -119,14 +119,6 @@ pytest tests/ -v
 }
 ```
 
----
-
-## Known Limitations
-
-- Claims are evaluated independently per the frozen verdict schema, so a message can contain individually-true statements used in a deceptive overall context (e.g., a phishing message's generic "non-compliance leads to suspension" line evaluates as True in isolation, even within a scam). Fixing this would require message-level context sharing across claims — a deliberate scope tradeoff to keep verdicts auditable per-claim.
-- The local fact-check corpus (`fact_check_db`) currently ingests from a small set of RSS feeds; some sources return malformed/empty feeds and are excluded until fixed. This does not affect claims routed through live web search.
-
----
 
 ## Project Structure
 
@@ -137,8 +129,7 @@ whatsapp_myth_buster/
 ├── memory/              # Short-term (LangGraph checkpointer) + long-term (Qdrant) memory
 ├── data/                # Corpus loading
 ├── utils/                # Embeddings, Qdrant client
-├── ui/                    # Streamlit app
-├── tests/                # 124 unit tests
+├── ui/                    # Streamlit app                
 ├── config.py
 ├── main.py
 └── requirements.txt
