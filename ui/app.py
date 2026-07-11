@@ -5,9 +5,14 @@ and displays per-claim verdicts with reasoning trail.
 """
 
 import streamlit as st
+import os
+
+# Bridge Streamlit secrets into environment variables so os.getenv() picks them up
+for key, value in st.secrets.items():
+    os.environ[key] = str(value)
 import logging
 import sys
-import os
+
 
 # Add project root to path
 sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
