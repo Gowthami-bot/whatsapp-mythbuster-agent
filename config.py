@@ -52,7 +52,6 @@ REFLECTION_THRESHOLD: float = float(os.getenv("REFLECTION_THRESHOLD", "0.4"))
 BOOMLIVE_RSS: str = "https://www.boomlive.in/fact-check/feed"
 ALTNEWS_RSS: str = "https://www.altnews.in/feed/"
 PIB_RSS: str = "https://pib.gov.in/RssMain.aspx?ModId=6&Lang=1&Regid=3"
-WHO_RSS: str = "https://www.who.int/rss-feeds/news-releases.xml"
 IFND_CSV_PATH: str = os.getenv("IFND_CSV_PATH", "./data/raw/IFND.csv")
 
 # ── Validation ─────────────────────────────────────────────────────────────────

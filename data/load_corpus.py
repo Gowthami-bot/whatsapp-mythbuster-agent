@@ -1,11 +1,10 @@
 """
 Corpus loader for WhatsApp Myth Buster Agent.
-Loads fact-check data from 5 sources:
+Loads fact-check data from 4 sources:
   1. BoomLive RSS feed
   2. AltNews RSS feed
   3. PIB RSS feed
-  4. WHO RSS feed
-  5. IFND CSV dataset (local file)
+  4. IFND CSV dataset (local file)
 
 Normalizes all sources into LangChain Documents,
 stores them in Qdrant fact_check_db collection,
@@ -27,7 +26,6 @@ from config import (
     BOOMLIVE_RSS,
     ALTNEWS_RSS,
     PIB_RSS,
-    WHO_RSS,
     IFND_CSV_PATH,
     QDRANT_FACT_COLLECTION,
     TOP_K_RETRIEVAL,
@@ -37,6 +35,20 @@ logger = logging.getLogger(__name__)
 
 # ── Module-level BM25 retriever (singleton) ────────────────────────────────────
 _bm25_retriever: BM25Retriever | None = None
+
+# Some RSS hosts (BoomLive, PIB) reject feedparser's default fetch (no/blank
+# User-Agent) at the edge even though the feed itself is valid XML. Fetching
+# with a browser-like UA via requests, then handing the raw bytes to
+# feedparser, works around this without touching feedparser's parsing logic.
+_RSS_REQUEST_HEADERS = {
+    "User-Agent": (
+        "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+        "AppleWebKit/537.36 (KHTML, like Gecko) "
+        "Chrome/124.0.0.0 Safari/537.36"
+    ),
+    "Accept": "application/rss+xml, application/xml, text/xml, */*",
+}
+_RSS_REQUEST_TIMEOUT = 15  # seconds
 
 
 def get_bm25_retriever() -> BM25Retriever | None:
@@ -52,7 +64,12 @@ def get_bm25_retriever() -> BM25Retriever | None:
 
 def _load_rss_feed(url: str, source_name: str) -> list[Document]:
     """
-    Parse an RSS feed and return LangChain Documents.
+    Fetch and parse an RSS feed, returning LangChain Documents.
+
+    Fetches the feed ourselves with a browser-like User-Agent via `requests`
+    and hands the raw bytes to feedparser, rather than letting feedparser
+    fetch the URL directly. Some sources (BoomLive, PIB) return valid XML
+    to a browser-like client but reject feedparser's bare default fetch.
 
     Args:
         url: RSS feed URL.
@@ -63,9 +80,28 @@ def _load_rss_feed(url: str, source_name: str) -> list[Document]:
     """
     docs: list[Document] = []
     try:
-        feed = feedparser.parse(url)
-        if feed.bozo:
-            logger.warning("RSS feed may be malformed: %s", source_name)
+        response = requests.get(
+            url, headers=_RSS_REQUEST_HEADERS, timeout=_RSS_REQUEST_TIMEOUT
+        )
+        response.raise_for_status()
+
+        feed = feedparser.parse(response.content)
+
+        # feedparser sets bozo=1 for a range of issues, some cosmetic (e.g.
+        # minor XML declaration mismatches) and some fatal. Only treat it as
+        # a real failure if we also got zero entries out of it.
+        if feed.bozo and not feed.entries:
+            logger.warning(
+                "RSS feed malformed and no entries parsed for %s: %s",
+                source_name,
+                feed.bozo_exception,
+            )
+            return docs
+        elif feed.bozo:
+            logger.info(
+                "RSS feed %s reported bozo=1 but entries were parsed; continuing.",
+                source_name,
+            )
 
         for entry in feed.entries:
             title = entry.get("title", "").strip()
@@ -89,6 +125,8 @@ def _load_rss_feed(url: str, source_name: str) -> list[Document]:
 
         logger.info("Loaded %d documents from %s", len(docs), source_name)
 
+    except requests.RequestException as e:
+        logger.error("Failed to fetch RSS feed %s: %s", source_name, e)
     except Exception as e:
         logger.error("Failed to load RSS feed %s: %s", source_name, e)
 
@@ -107,37 +145,49 @@ def _load_ifnd_csv(filepath: str) -> list[Document]:
         list[Document]: Parsed documents from the dataset.
     """
     docs: list[Document] = []
+    f = None
     try:
-        with open(filepath, newline="", encoding="utf-8") as f:
-            reader = csv.DictReader(f)
-            for row in reader:
-                # Handle different column name conventions
-                content = (
-                    row.get("statement")
-                    or row.get("text")
-                    or row.get("claim")
-                    or ""
-                ).strip()
+        try:
+            f = open(filepath, newline="", encoding="utf-8")
+            f.read()
+            f.seek(0)
+        except UnicodeDecodeError:
+            if f:
+                f.close()
+            logger.warning(
+                "IFND CSV is not valid UTF-8 — retrying with cp1252 (errors replaced)."
+            )
+            f = open(filepath, newline="", encoding="cp1252", errors="replace")
 
-                if not content or len(content) < 10:
-                    continue
+        reader = csv.DictReader(f)
+        for row in reader:
+            content = (
+                row.get("Statement")
+                or row.get("statement")
+                or row.get("text")
+                or row.get("claim")
+                or ""
+            ).strip()
 
-                raw_label = str(
-                    row.get("label", row.get("Label", ""))
-                ).strip().lower()
+            if not content or len(content) < 10:
+                continue
 
-                verdict = "False" if raw_label in ["fake", "0", "false"] else "True"
+            raw_label = str(
+                row.get("Label", row.get("label", ""))
+            ).strip().lower()
 
-                doc = Document(
-                    page_content=content,
-                    metadata={
-                        "source": row.get("source", "IFND"),
-                        "origin": "IFND",
-                        "verdict": verdict,
-                        "published": row.get("date", ""),
-                    }
-                )
-                docs.append(doc)
+            verdict = "False" if raw_label in ["fake", "0", "false"] else "True"
+
+            doc = Document(
+                page_content=content,
+                metadata={
+                    "source": row.get("Web", row.get("source", "IFND")),
+                    "origin": "IFND",
+                    "verdict": verdict,
+                    "published": row.get("Date", row.get("date", "")),
+                }
+            )
+            docs.append(doc)
 
         logger.info("Loaded %d records from IFND dataset.", len(docs))
 
@@ -145,9 +195,11 @@ def _load_ifnd_csv(filepath: str) -> list[Document]:
         logger.warning("IFND CSV not found at: %s — skipping.", filepath)
     except Exception as e:
         logger.error("Failed to load IFND CSV: %s", e)
+    finally:
+        if f:
+            f.close()
 
     return docs
-
 
 def _store_in_qdrant(documents: list[Document]) -> None:
     """
@@ -212,7 +264,6 @@ def build_fact_check_db(force_reload: bool = False) -> list[Document]:
     all_docs += _load_rss_feed(BOOMLIVE_RSS, "BoomLive")
     all_docs += _load_rss_feed(ALTNEWS_RSS, "AltNews")
     all_docs += _load_rss_feed(PIB_RSS, "PIB")
-    all_docs += _load_rss_feed(WHO_RSS, "WHO")
     all_docs += _load_ifnd_csv(IFND_CSV_PATH)
 
     if not all_docs:
