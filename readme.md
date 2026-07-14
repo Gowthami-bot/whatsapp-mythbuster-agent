@@ -2,7 +2,7 @@
 
 An agentic RAG system that fact-checks WhatsApp misinformation using multi-step reasoning, hybrid retrieval, semantic caching, and self-reflective evidence grading.
 
-**Live demo:** [Add your Streamlit Cloud URL here]
+**Live demo:** https://whatsapp-mythbuster-agent-gowthami.streamlit.app/
 
 ---
 
